@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mark's Mystical Scavenger</title>
+    <style>
+        body {
+            background-color: #0d0e15;
+            color: #c8c9db;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        h1 {
+            text-shadow: 0 0 10px #e94560;
+            color: #e94560;
+            margin-bottom: 5px;
+        }
+        p { margin-top: 0; }
+        canvas {
+            background-color: #1a1a2e;
+            box-shadow: 0 0 20px rgba(233, 69, 96, 0.4);
+            border: 2px solid #0f3460;
+            image-rendering: pixelated;
+        }
+        #controls {
+            margin-top: 15px;
+            text-align: center;
+            background: #16213e;
+            padding: 10px 20px;
+            border-radius: 5px;
+            border: 1px solid #0f3460;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Mystical Scavenger</h1>
+    <p>Mark's Survival RPG</p>
+    <canvas id="gameCanvas" width="800" height="640"></canvas>
+    
+    <div id="controls">
+        <strong>Arrows / WASD:</strong> Move Mark | <strong>Spacebar:</strong> Interact (Sell/Buy) <br>
+        <em>Find glowing Antiques. Sell to the Dealer (Purple). Buy White Bread from the Cafe (Orange). Don't starve!</em>
+    </div>
+
+<script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // Game Constants
+    const TILE_SIZE = 32;
+    const COLS = Math.floor(canvas.width / TILE_SIZE);
+    const ROWS = Math.floor(canvas.height / TILE_SIZE);
+    
+    // Mystical Color Palette
+    const COLORS = {
+        floor: "#1a1a2e",
+        wall: "#0f3460",
+        player: "#e94560", // Mark
+        antique: "#f9a826", // Glowing yellow
+        dealer: "#9a0f98", // Mystical Purple
+        cafe: "#f47c7c", // Bread pink/orange
+        text: "#ffffff"
+    };
+
+    // Game State
+    let map = [];
+    let antiques = [];
+    let messageLog = "Welcome to the shifting city, Mark...";
+    let messageTimer = 100;
+    let gameOver = false;
+
+    // Entities
+    const player = { x: 1, y: 1, money: 0, hunger: 100, inventory: 0 };
+    const dealer = { x: 0, y: 0 };
+    const cafe = { x: 0, y: 0 };
+
+    // Procedural Map Generation
+    function generateMap() {
+        // Fill with floors
+        for (let y = 0; y < ROWS; y++) {
+            map[y] = [];
+            for (let x = 0; x < COLS; x++) {
+                // Edge walls
+                if (x === 0 || x === COLS - 1 || y === 0 || y === ROWS - 1) {
+                    map[y][x] = 1;
+                } else {
+                    map[y][x] = 0;
+                }
+            }
+        }
+
+        // Generate random buildings (clusters of walls)
+        let numBuildings = 20;
+        for (let i = 0; i < numBuildings; i++) {
+            let bx = Math.floor(Math.random() * (COLS - 4)) + 2;
+            let by = Math.floor(Math.random() * (ROWS - 4)) + 2;
+            let bw = Math.floor(Math.random() * 4) + 2;
+            let bh = Math.floor(Math.random() * 4) + 2;
+            
+            for (let y = by; y < by + bh && y < ROWS - 1; y++) {
+                for (let x = bx; x < bx + bw && x < COLS - 1; x++) {
+                    map[y][x] = 1;
+                }
+            }
+        }
+
+        // Place Player safely
+        player.x = 1; player.y = 1;
+        map[player.y][player.x] = 0;
+
+        // Place NPCs
+        placeEntity(dealer);
+        placeEntity(cafe);
+
+        // Spawn Initial Antiques
+        for(let i=0; i<10; i++) spawnAntique();
+    }
+
+    function placeEntity(entity) {
+        let placed = false;
+        while (!placed) {
+            let x = Math.floor(Math.random() * COLS);
+            let y = Math.floor(Math.random() * ROWS);
+            if (map[y][x] === 0 && (x !== player.x || y !== player.y)) {
+                entity.x = x;
+                entity.y = y;
+                map[y][x] = 2; // Mark as occupied by NPC to prevent item spawns on them
+                placed = true;
+            }
+        }
+    }
+
+    function spawnAntique() {
+        let placed = false;
+        while (!placed) {
+            let x = Math.floor(Math.random() * COLS);
+            let y = Math.floor(Math.random() * ROWS);
+            if (map[y][x] === 0) {
+                // Check if antique already exists here
+                let exists = antiques.some(a => a.x === x && a.y === y);
+                if (!exists) {
+                    antiques.push({ x, y });
+                    placed = true;
+                }
+            }
+        }
+    }
+
+    function logMessage(msg) {
+        messageLog = msg;
+        messageTimer = 150; // frames to display
+    }
+
+    // Input Handling
+    window.addEventListener("keydown", (e) => {
+        if (gameOver) return;
+
+        let dx = 0, dy = 0;
+        if (e.key === "ArrowUp" || e.key === "w") dy = -1;
+        if (e.key === "ArrowDown" || e.key === "s") dy = 1;
+        if (e.key === "ArrowLeft" || e.key === "a") dx = -1;
+        if (e.key === "ArrowRight" || e.key === "d") dx = 1;
+
+        if (dx !== 0 || dy !== 0) {
+            let nx = player.x + dx;
+            let ny = player.y + dy;
+
+            // Collision check
+            if (map[ny][nx] !== 1 && !(nx === dealer.x && ny === dealer.y) && !(nx === cafe.x && ny === cafe.y)) {
+                player.x = nx;
+                player.y = ny;
+                
+                // Hunger mechanics
+                player.hunger -= 1;
+                if (player.hunger <= 0) {
+                    gameOver = true;
+                    logMessage("Mark starved in the shifting city... Game Over.");
+                }
+
+                // Check Item Pickup
+                let itemIndex = antiques.findIndex(a => a.x === player.x && a.y === player.y);
+                if (itemIndex !== -1) {
+                    antiques.splice(itemIndex, 1);
+                    player.inventory++;
+                    logMessage("Found an eerie antique!");
+                    spawnAntique(); // Keep map populated
+                }
+            }
+        }
+
+        // Interaction (Spacebar)
+        if (e.key === " ") {
+            let distToDealer = Math.abs(player.x - dealer.x) + Math.abs(player.y - dealer.y);
+            let distToCafe = Math.abs(player.x - cafe.x) + Math.abs(player.y - cafe.y);
+
+            if (distToDealer === 1) {
+                if (player.inventory > 0) {
+                    let earned = player.inventory * 25;
+                    player.money += earned;
+                    logMessage(`Dealer: "Ah, dark relics. Here's ${earned} Gold."`);
+                    player.inventory = 0;
+                } else {
+                    logMessage(`Dealer: "Bring me antiques, Mark. I don't give handouts."`);
+                }
+            } 
+            else if (distToCafe === 1) {
+                const BREAD_COST = 15;
+                if (player.money >= BREAD_COST) {
+                    if (player.hunger >= 100) {
+                        logMessage(`Cafe: "You look full, Mark. Save your coin."`);
+                    } else {
+                        player.money -= BREAD_COST;
+                        player.hunger = Math.min(100, player.hunger + 40);
+                        logMessage(`Cafe: "Fresh white bread! Be safe out there." (+40 Hunger)`);
+                    }
+                } else {
+                    logMessage(`Cafe: "White bread costs ${BREAD_COST} Gold. You're broke!"`);
+                }
+            } else {
+                logMessage("Nothing to interact with here.");
+            }
+        }
+    });
+
+    // Rendering Loop
+    function draw() {
+        // Clear screen
+        ctx.fillStyle = COLORS.floor;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw Map Walls
+        ctx.fillStyle = COLORS.wall;
+        for (let y = 0; y < ROWS; y++) {
+            for (let x = 0; x < COLS; x++) {
+                if (map[y][x] === 1) {
+                    ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                    // Add a mystical inner border
+                    ctx.strokeStyle = "#16213e";
+                    ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                }
+            }
+        }
+
+        // Draw Antiques (with pulsating glow)
+        let glow = Math.abs(Math.sin(Date.now() / 300)) * 5;
+        for (let a of antiques) {
+            ctx.fillStyle = COLORS.antique;
+            ctx.shadowBlur = 10 + glow;
+            ctx.shadowColor = COLORS.antique;
+            ctx.beginPath();
+            ctx.arc(a.x * TILE_SIZE + TILE_SIZE/2, a.y * TILE_SIZE + TILE_SIZE/2, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0; // reset
+        }
+
+        // Draw Dealer
+        ctx.fillStyle = COLORS.dealer;
+        ctx.fillRect(dealer.x * TILE_SIZE + 4, dealer.y * TILE_SIZE + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+        ctx.fillStyle = "#fff";
+        ctx.font = "14px Courier";
+        ctx.fillText("DLR", dealer.x * TILE_SIZE + 4, dealer.y * TILE_SIZE + 20);
+
+        // Draw Cafe
+        ctx.fillStyle = COLORS.cafe;
+        ctx.fillRect(cafe.x * TILE_SIZE + 4, cafe.y * TILE_SIZE + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+        ctx.fillStyle = "#000";
+        ctx.fillText("CAF", cafe.x * TILE_SIZE + 4, cafe.y * TILE_SIZE + 20);
+
+        // Draw Player (Mark)
+        ctx.fillStyle = COLORS.player;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = COLORS.player;
+        ctx.beginPath();
+        ctx.arc(player.x * TILE_SIZE + TILE_SIZE/2, player.y * TILE_SIZE + TILE_SIZE/2, 10, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0; // reset
+
+        // Draw HUD / UI overlay
+        ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+        ctx.fillRect(0, 0, canvas.width, 40);
+        
+        ctx.fillStyle = COLORS.text;
+        ctx.font = "18px Courier New";
+        ctx.fillText(`Hunger: ${player.hunger}% | Gold: ${player.money} | Antiques: ${player.inventory}`, 10, 26);
+
+        // Draw Message Log
+        if (messageTimer > 0) {
+            ctx.fillStyle = "rgba(22, 33, 62, 0.9)";
+            ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
+            ctx.fillStyle = "#e94560";
+            ctx.font = "16px Courier New";
+            ctx.fillText(messageLog, 10, canvas.height - 15);
+            messageTimer--;
+        }
+
+        if (gameOver) {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "#e94560";
+            ctx.font = "40px Courier New";
+            ctx.textAlign = "center";
+            ctx.fillText("YOU STARVED.", canvas.width/2, canvas.height/2);
+            ctx.font = "20px Courier New";
+            ctx.fillText("Refresh the page to try again.", canvas.width/2, canvas.height/2 + 40);
+            ctx.textAlign = "left"; // Reset
+        }
+
+        requestAnimationFrame(draw);
+    }
+
+    // Initialize Game
+    generateMap();
+    draw();
+</script>
+</body>
+</html>
